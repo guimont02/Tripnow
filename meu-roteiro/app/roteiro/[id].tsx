@@ -13,12 +13,28 @@ import {
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useTheme, type Colors } from '../../lib/theme';
-import type { Activity, ActivityType, Itinerary } from '../../types';
+import type { Activity, ActivityType, Flight, Itinerary } from '../../types';
 
 function getDayDate(startDate: string, day: number): string {
   const date = new Date(startDate);
   date.setDate(date.getDate() + day - 1);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getDayDateISO(startDate: string, day: number): string {
+  const [y, m, d] = startDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d + day - 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function getLocalDateISO(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatFlightTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
 const SECTIONS: { type: ActivityType; label: string; emoji: string }[] = [
@@ -179,6 +195,44 @@ function makeStyles(colors: Colors) {
     },
     pdfBtnText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
     cardHint: { fontSize: 11, color: colors.borderInput, marginTop: 4 },
+    flightSection: { gap: 8 },
+    flightSectionLabel: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    flightCard: {
+      backgroundColor: '#0c2340',
+      borderRadius: 12,
+      padding: 16,
+      gap: 4,
+    },
+    flightCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    flightAirline: { fontSize: 12, fontWeight: '700', color: '#93c5fd', textTransform: 'uppercase', letterSpacing: 0.5 },
+    flightNumber: { fontSize: 12, color: '#93c5fd' },
+    flightRoute: { fontSize: 24, fontWeight: '800', color: '#fff', letterSpacing: 3 },
+    flightTime: { fontSize: 13, color: '#bfdbfe' },
+    flightLocator: { fontSize: 13, color: '#60a5fa', fontWeight: '600', marginTop: 4 },
+    flightHint: { fontSize: 11, color: '#475569', marginTop: 4 },
+    addFlightBtn: {
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+      paddingVertical: 12,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.borderInput,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    addFlightBtnText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   });
 }
 
@@ -190,6 +244,7 @@ export default function RoteiroDetailScreen() {
 
   const [itinerary, setItinerary] = useState<Itinerary | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [flights, setFlights] = useState<Flight[]>([]);
   const [selectedDay, setSelectedDay] = useState(1);
   const [loading, setLoading] = useState(true);
 
@@ -218,12 +273,14 @@ export default function RoteiroDetailScreen() {
   async function fetchData() {
     try {
       setLoading(true);
-      const [{ data: itin }, { data: acts }] = await Promise.all([
+      const [{ data: itin }, { data: acts }, { data: fls }] = await Promise.all([
         supabase.from('itineraries').select('*').eq('id', id).single(),
         supabase.from('activities').select('*').eq('itinerary_id', id),
+        supabase.from('flights').select('*').eq('itinerary_id', id).order('departure_datetime'),
       ]);
       setItinerary(itin);
       setActivities(acts ?? []);
+      setFlights(fls ?? []);
     } finally {
       setLoading(false);
     }
@@ -254,6 +311,17 @@ export default function RoteiroDetailScreen() {
   const days = Array.from({ length: itinerary.duration ?? 1 }, (_, i) => i + 1);
   const dayActivities = activities.filter((a) => a.day === selectedDay);
 
+  const dayFlights = flights.filter((f) => {
+    const flightDate = getLocalDateISO(f.departure_datetime);
+    if (itinerary.start_date) {
+      const dayDate = getDayDateISO(itinerary.start_date, selectedDay);
+      console.log(`[flights] flight=${flightDate} dayDate=${dayDate} day=${selectedDay} start=${itinerary.start_date}`);
+      return flightDate === dayDate;
+    }
+    console.log(`[flights] no start_date, flightDate=${flightDate} selectedDay=${selectedDay}`);
+    return selectedDay === 1;
+  });
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -271,6 +339,9 @@ export default function RoteiroDetailScreen() {
           <View style={styles.headerActions}>
             <Pressable style={styles.editBtn} onPress={() => router.push(`/roteiro/editar/${id}`)}>
               <Text style={styles.editBtnText}>Edit</Text>
+            </Pressable>
+            <Pressable style={styles.editBtn} onPress={() => router.push(`/documentos/${id}`)}>
+              <Text style={styles.editBtnText}>Docs</Text>
             </Pressable>
             <Pressable style={styles.aiBtn} onPress={() => router.push(`/roteiro/agente/${id}`)}>
               <Text style={styles.aiBtnText}>✨ AI</Text>
@@ -307,6 +378,39 @@ export default function RoteiroDetailScreen() {
       </ScrollView>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        {dayFlights.length > 0 && (
+          <View style={styles.flightSection}>
+            <Text style={styles.flightSectionLabel}>✈️ Voos</Text>
+            {dayFlights.map((flight) => (
+              <Pressable
+                key={flight.id}
+                style={styles.flightCard}
+                onPress={() => router.push(`/voo/${flight.id}`)}
+              >
+                <View style={styles.flightCardHeader}>
+                  <Text style={styles.flightAirline}>{flight.airline}</Text>
+                  {flight.flight_number && (
+                    <Text style={styles.flightNumber}>{flight.flight_number}</Text>
+                  )}
+                </View>
+                <Text style={styles.flightRoute}>
+                  {flight.origin} → {flight.destination}
+                </Text>
+                <Text style={styles.flightTime}>
+                  Partida: {formatFlightTime(flight.departure_datetime)}
+                  {flight.arrival_datetime
+                    ? `  ·  Chegada: ${formatFlightTime(flight.arrival_datetime)}`
+                    : ''}
+                </Text>
+                {flight.locator && (
+                  <Text style={styles.flightLocator}>Localizador: {flight.locator}</Text>
+                )}
+                <Text style={styles.flightHint}>Toque para editar</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         <View style={styles.addRow}>
           {SECTIONS.map((section) => (
             <Pressable
@@ -321,6 +425,14 @@ export default function RoteiroDetailScreen() {
             </Pressable>
           ))}
         </View>
+
+        <Pressable
+          style={styles.addFlightBtn}
+          onPress={() => router.push(`/voo/novo?itinerary_id=${id}`)}
+        >
+          <Text style={{ fontSize: 16 }}>✈️</Text>
+          <Text style={styles.addFlightBtnText}>+ Adicionar Voo</Text>
+        </Pressable>
 
         {dayActivities.length === 0 ? (
           <Text style={styles.emptyDay}>No activities for Day {selectedDay} yet.</Text>

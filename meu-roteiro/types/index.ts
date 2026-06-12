@@ -24,3 +24,24 @@ export interface Activity {
   pdf_url?: string;
   created_at: string;
 }
+
+export interface Flight {
+  id: string;
+  itinerary_id: string;
+  airline: string;
+  flight_number?: string;
+  origin: string;
+  destination: string;
+  departure_datetime: string;
+  arrival_datetime?: string;
+  locator?: string;
+  created_at: string;
+}
+
+export interface TripDocument {
+  id: string;
+  itinerary_id: string;
+  name: string;
+  file_url: string;
+  created_at: string;
+}

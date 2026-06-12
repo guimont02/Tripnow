@@ -16,7 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { useTheme, type Colors } from '../../lib/theme';
 
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function displayDate(date: Date): string {
