@@ -140,6 +140,9 @@ Flights appear in the timeline by matching their local departure date against th
 - Generates structured JSON plans wrapped in `<<<PLAN>>>...<<<END>>>` markers
 - Adaptive prompt: asks questions for new trips, suggests improvements for existing ones
 - Env var: `EXPO_PUBLIC_ANTHROPIC_API_KEY`
+- Opening greeting is generated locally (no API call) — saves tokens on every screen open
+- Conversation is persisted per itinerary in AsyncStorage with key `chat_<itinerary_id>`
+- Each activity includes a `location` field with a Google Maps search URL (`https://www.google.com/maps/search/?api=1&query=Place+Name+City`)
 
 ### Theme system (`lib/theme.ts`)
 - Light/dark toggle available on every screen
@@ -155,10 +158,18 @@ EXPO_PUBLIC_ANTHROPIC_API_KEY=
 
 ## Commands
 ```bash
-npx expo start          # Start dev server
-npx tsc --noEmit        # Type check
-npx expo install <pkg>  # Add package
+npx expo start                                              # Start dev server
+npx tsc --noEmit                                           # Type check
+npx expo install <pkg>                                     # Add package
+eas update --branch main --message "description"           # Publish update to Expo Go
 ```
+
+## EAS Update
+- Project is configured for EAS Update (expo.dev account: `monteiro_02`, project: `meu-roteiro`)
+- `app.json` has `extra.eas.projectId` and `updates.url` already configured
+- Publishing with `eas update` is independent of GitHub — only what's published via EAS matters
+- Expo Go always loads the latest published version on the `main` branch automatically
+- To install dependencies without peer dep conflicts: `npm install <pkg> --legacy-peer-deps`
 
 ## Coding Guidelines
 - Functional components with hooks only
