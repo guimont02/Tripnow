@@ -16,8 +16,8 @@ import { useTheme, type Colors } from '../../lib/theme';
 import type { Activity, ActivityType, Flight, Itinerary } from '../../types';
 
 function getDayDate(startDate: string, day: number): string {
-  const date = new Date(startDate);
-  date.setDate(date.getDate() + day - 1);
+  const [y, m, d] = startDate.split('-').map(Number);
+  const date = new Date(y, m - 1, d + day - 1);
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
@@ -333,7 +333,7 @@ export default function RoteiroDetailScreen() {
             )}
             <Text style={styles.headerDuration}>
               {itinerary.duration} {itinerary.duration === 1 ? 'day' : 'days'}
-              {itinerary.start_date ? ` · from ${new Date(itinerary.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}` : ''}
+              {itinerary.start_date ? ` · from ${(() => { const [y, m, d] = itinerary.start_date!.split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); })()}` : ''}
             </Text>
           </View>
           <View style={styles.headerActions}>

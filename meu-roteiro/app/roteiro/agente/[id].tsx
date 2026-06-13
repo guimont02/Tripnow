@@ -11,11 +11,25 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { sendMessage, extractPlan, type ChatMessage } from '../../../lib/ai';
 import { useTheme, type Colors } from '../../../lib/theme';
 import type { Activity, Itinerary } from '../../../types';
+
+function buildLocalGreeting(itinerary: Itinerary, activities: Activity[]): string {
+  if (activities.length > 0) {
+    const summary = activities
+      .sort((a, b) => a.day - b.day)
+      .slice(0, 5)
+      .map((a) => `• Day ${a.day}: ${a.title}`)
+      .join('\n');
+    const more = activities.length > 5 ? `\n...and ${activities.length - 5} more activities.` : '';
+    return `Hey! Your trip to ${itinerary.country} already has ${activities.length} activities planned:\n\n${summary}${more}\n\nWhat would you like to improve or add?`;
+  }
+  return `Hey! I'm your travel assistant for your trip to ${itinerary.country}. Let's build your itinerary!\n\nFirst question: what kind of food do you enjoy?`;
+}
 
 function buildSystemPrompt(itinerary: Itinerary, activities: Activity[]): string {
   const cities = itinerary.cities?.join(', ') || 'not specified';
@@ -70,10 +84,13 @@ The JSON must be an array of objects with this structure:
   "type": "restaurant" | "place" | "attraction",
   "title": "name",
   "time": "HH:MM",
+  "location": "Google Maps URL — MUST be in the format https://www.google.com/maps/search/?api=1&query=Place+Name+City+Country (replace spaces with +). This field must contain ONLY the URL, never a text address.",
   "culinary_type": "cuisine" (restaurants only, otherwise omit),
   "estimated_price": "$" | "$$" | "$$$" | "$$$$" (restaurants only, otherwise omit),
-  "notes": "one sentence description"
+  "notes": "one sentence description of the place — do NOT put URLs here"
 }
+
+IMPORTANT: Every activity MUST have a "location" field with a valid Google Maps URL. Never put the URL in "notes". Example location value: "https://www.google.com/maps/search/?api=1&query=Eiffel+Tower+Paris+France"
 
 Include per day: 2 restaurants, 2 places, 1-2 attractions. Use realistic times.
 Keep your messages short and conversational.`;
@@ -190,16 +207,11 @@ export default function AgenteScreen() {
       setItinerary(itin);
       setActivities(acts ?? []);
 
-      setLoading(true);
-      try {
-        const seed: ChatMessage = { role: 'user', content: 'Hello!' };
-        const greeting = await sendMessage([seed], buildSystemPrompt(itin, acts ?? []));
-        setMessages([{ role: 'assistant', content: greeting }]);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        Alert.alert('Error', msg);
-      } finally {
-        setLoading(false);
+      const saved = await AsyncStorage.getItem(`chat_${id}`);
+      if (saved) {
+        setMessages(JSON.parse(saved));
+      } else {
+        setMessages([{ role: 'assistant', content: buildLocalGreeting(itin, acts ?? []) }]);
       }
     }
     init();
@@ -216,7 +228,9 @@ export default function AgenteScreen() {
 
     try {
       const reply = await sendMessage(updatedMessages, buildSystemPrompt(itinerary, activities));
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+      const updatedWithReply = [...updatedMessages, { role: 'assistant' as const, content: reply }];
+      setMessages(updatedWithReply);
+      await AsyncStorage.setItem(`chat_${id}`, JSON.stringify(updatedWithReply));
 
       const plan = extractPlan(reply);
       if (plan) await savePlan(plan);
@@ -238,6 +252,7 @@ export default function AgenteScreen() {
         type: a.type,
         title: a.title,
         time: a.time ?? null,
+        location: a.location ?? null,
         culinary_type: a.culinary_type ?? null,
         estimated_price: a.estimated_price ?? null,
         notes: a.notes ?? null,
