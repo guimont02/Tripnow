@@ -95,6 +95,17 @@ function makeStyles(colors: Colors) {
       paddingVertical: 6,
     },
     aiBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    tripModeBtn: {
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderRadius: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      marginTop: 12,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.4)',
+    },
+    tripModeBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
     themeBtn: {
       backgroundColor: 'rgba(255,255,255,0.2)',
       borderRadius: 8,
@@ -311,6 +322,16 @@ export default function RoteiroDetailScreen() {
   const days = Array.from({ length: itinerary.duration ?? 1 }, (_, i) => i + 1);
   const dayActivities = activities.filter((a) => a.day === selectedDay);
 
+  const isTripActive = (() => {
+    if (!itinerary.start_date || !itinerary.duration) return false;
+    const [y, m, d] = itinerary.start_date.split('-').map(Number);
+    const start = new Date(y, m - 1, d);
+    const end = new Date(y, m - 1, d + itinerary.duration - 1);
+    const today = new Date();
+    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return todayDate >= start && todayDate <= end;
+  })();
+
   const dayFlights = flights.filter((f) => {
     const flightDate = getLocalDateISO(f.departure_datetime);
     if (itinerary.start_date) {
@@ -351,6 +372,11 @@ export default function RoteiroDetailScreen() {
             </Pressable>
           </View>
         </View>
+        {isTripActive && (
+          <Pressable style={styles.tripModeBtn} onPress={() => router.push(`/roteiro/viagem/${id}`)}>
+            <Text style={styles.tripModeBtnText}>🗺️ Trip Mode — Active now</Text>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView

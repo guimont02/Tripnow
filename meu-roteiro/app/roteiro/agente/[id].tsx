@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../../lib/supabase';
 import { sendMessage, extractPlan, type ChatMessage } from '../../../lib/ai';
+import { getWeather } from '../../../lib/weather';
 import { useTheme, type Colors } from '../../../lib/theme';
 import type { Activity, Itinerary } from '../../../types';
 
@@ -31,7 +32,14 @@ function buildLocalGreeting(itinerary: Itinerary, activities: Activity[]): strin
   return `Hey! I'm your travel assistant for your trip to ${itinerary.country}. Let's build your itinerary!\n\nFirst question: what kind of food do you enjoy?`;
 }
 
-function buildSystemPrompt(itinerary: Itinerary, activities: Activity[]): string {
+interface TripModeContext {
+  tripDay: number;
+  currentTime: string;
+  weather: string;
+  nextActivity: string;
+}
+
+function buildSystemPrompt(itinerary: Itinerary, activities: Activity[], tripContext?: TripModeContext): string {
   const cities = itinerary.cities?.join(', ') || 'not specified';
   const startDate = itinerary.start_date
     ? new Date(itinerary.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
@@ -62,6 +70,16 @@ Ask the user 3 questions ONE AT A TIME:
 
 After getting all 3 answers, tell them you're generating the plan.`;
 
+  const tripModeSection = tripContext
+    ? `\nReal-time context (Trip Mode active):
+- Current trip day: ${tripContext.tripDay} of ${itinerary.duration}
+- Current time: ${tripContext.currentTime}
+- Weather: ${tripContext.weather}
+- Next activity: ${tripContext.nextActivity}
+
+You are acting as a real-time travel companion. Prioritize practical, immediate suggestions based on the current time, weather and next activity.\n`
+    : '';
+
   return `You are a friendly travel planning assistant helping plan a trip.
 
 Trip details:
@@ -69,7 +87,7 @@ Trip details:
 - Cities: ${cities}
 - Duration: ${itinerary.duration} days
 - Start date: ${startDate}
-
+${tripModeSection}
 ${planningSection}
 
 When outputting activities, use this exact format:
@@ -183,7 +201,8 @@ function makeStyles(colors: Colors) {
 }
 
 export default function AgenteScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, mode } = useLocalSearchParams<{ id: string; mode?: string }>();
+  const isTripMode = mode === 'viagem';
   const router = useRouter();
   const { colors, dark, toggleTheme } = useTheme();
   const styles = makeStyles(colors);
@@ -191,6 +210,7 @@ export default function AgenteScreen() {
   const [itinerary, setItinerary] = useState<Itinerary | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [tripContext, setTripContext] = useState<TripModeContext | undefined>();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -206,6 +226,20 @@ export default function AgenteScreen() {
       if (!itin) return;
       setItinerary(itin);
       setActivities(acts ?? []);
+
+      if (isTripMode && itin.start_date && itin.cities?.length) {
+        const now = new Date();
+        const [y, m, d] = itin.start_date.split('-').map(Number);
+        const start = new Date(y, m - 1, d);
+        const tripDay = Math.floor((new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() - start.getTime()) / 86400000) + 1;
+        const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const weatherInfo = await getWeather(itin.cities[0]);
+        const weather = weatherInfo ? `${weatherInfo.temperature}°C, ${weatherInfo.condition}` : 'unavailable';
+        const sortedActs = (acts ?? []).filter((a) => a.day === tripDay).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
+        const next = sortedActs.find((a) => !a.time || a.time > currentTime);
+        const nextActivity = next ? `${next.title} at ${next.time?.slice(0, 5) ?? '--:--'}` : 'No more activities today';
+        setTripContext({ tripDay, currentTime, weather, nextActivity });
+      }
 
       const saved = await AsyncStorage.getItem(`chat_${id}`);
       if (saved) {
@@ -227,7 +261,7 @@ export default function AgenteScreen() {
     setLoading(true);
 
     try {
-      const reply = await sendMessage(updatedMessages, buildSystemPrompt(itinerary, activities));
+      const reply = await sendMessage(updatedMessages, buildSystemPrompt(itinerary, activities, tripContext));
       const updatedWithReply = [...updatedMessages, { role: 'assistant' as const, content: reply }];
       setMessages(updatedWithReply);
       await AsyncStorage.setItem(`chat_${id}`, JSON.stringify(updatedWithReply));
