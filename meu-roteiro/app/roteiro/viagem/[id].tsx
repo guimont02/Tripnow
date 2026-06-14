@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -12,36 +12,8 @@ import { Stack, useLocalSearchParams, useRouter, useFocusEffect } from 'expo-rou
 import { supabase } from '../../../lib/supabase';
 import { getWeather, type WeatherInfo } from '../../../lib/weather';
 import { useTheme, type Colors } from '../../../lib/theme';
+import { getLocalDateISO, getTodayISO, getTripDateStatus, formatTime, minutesUntil } from '../../../lib/tripDates';
 import type { Activity, Flight, Itinerary } from '../../../types';
-
-function getLocalDateISO(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function getTodayISO(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function getCurrentTripDay(startDate: string): number {
-  const [y, m, d] = startDate.split('-').map(Number);
-  const start = new Date(y, m - 1, d);
-  const today = new Date();
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return Math.floor((todayMidnight.getTime() - start.getTime()) / 86400000) + 1;
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function minutesUntil(time: string): number {
-  const [h, min] = time.split(':').map(Number);
-  const now = new Date();
-  return (h * 60 + min) - (now.getHours() * 60 + now.getMinutes());
-}
 
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
@@ -215,6 +187,8 @@ export default function ViagemScreen() {
   const [weather, setWeather] = useState<WeatherInfo | null>(null);
   const [warning, setWarning] = useState<Warning | null>(null);
   const [loading, setLoading] = useState(true);
+  const transitioningIds = useRef(new Set<string>());
+  const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
@@ -231,7 +205,7 @@ export default function ViagemScreen() {
         setLoading(false);
 
         if (itin?.cities?.length) {
-          getWeather(itin.cities[0]).then(setWeather);
+          getWeather(itin.cities[0], itin.country ?? undefined).then(setWeather);
         }
       }
       fetchData();
@@ -243,11 +217,17 @@ export default function ViagemScreen() {
     newStatus: 'on_way' | 'in_progress' | 'done',
     allActivities: Activity[]
   ) {
+    if (transitioningIds.current.has(activity.id)) return;
+    transitioningIds.current.add(activity.id);
+    setPendingIds(new Set(transitioningIds.current));
+
     const updates: Record<string, unknown> = { status: newStatus };
     if (newStatus === 'on_way') updates.departed_at = new Date().toISOString();
     if (newStatus === 'in_progress') updates.arrived_at = new Date().toISOString();
 
     const { error } = await supabase.from('activities').update(updates).eq('id', activity.id);
+    transitioningIds.current.delete(activity.id);
+    setPendingIds(new Set(transitioningIds.current));
     if (error) return;
 
     setActivities((prev) => prev.map((a) => a.id === activity.id ? { ...a, ...updates } : a));
@@ -286,7 +266,23 @@ export default function ViagemScreen() {
     );
   }
 
-  const tripDay = itinerary.start_date ? getCurrentTripDay(itinerary.start_date) : 1;
+  const { isActive: tripActive, tripDay } = itinerary.start_date && itinerary.duration
+    ? getTripDateStatus(itinerary.start_date, itinerary.duration)
+    : { isActive: false, tripDay: 1 };
+
+  if (!tripActive) {
+    return (
+      <View style={styles.centered}>
+        <Text style={{ color: colors.text, textAlign: 'center', paddingHorizontal: 32 }}>
+          Trip Mode only available during your trip dates.
+        </Text>
+        <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.primary, fontWeight: '600' }}>Go back</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const todayISO = getTodayISO();
 
   const todayActivities = activities
@@ -389,17 +385,29 @@ export default function ViagemScreen() {
                 {!isDone && (
                   <View style={styles.agendaActions}>
                     {!item.status && (
-                      <Pressable style={styles.btnOutline} onPress={() => updateCheckin(item, 'on_way', todayActivities)}>
+                      <Pressable
+                        style={[styles.btnOutline, pendingIds.has(item.id) && { opacity: 0.4 }]}
+                        onPress={() => updateCheckin(item, 'on_way', todayActivities)}
+                        disabled={pendingIds.has(item.id)}
+                      >
                         <Text style={styles.btnOutlineText}>A caminho</Text>
                       </Pressable>
                     )}
                     {isOnWay && (
-                      <Pressable style={styles.btnSolid} onPress={() => updateCheckin(item, 'in_progress', todayActivities)}>
+                      <Pressable
+                        style={[styles.btnSolid, pendingIds.has(item.id) && { opacity: 0.4 }]}
+                        onPress={() => updateCheckin(item, 'in_progress', todayActivities)}
+                        disabled={pendingIds.has(item.id)}
+                      >
                         <Text style={styles.btnSolidText}>Cheguei</Text>
                       </Pressable>
                     )}
                     {isInProgress && (
-                      <Pressable style={styles.btnGreen} onPress={() => updateCheckin(item, 'done', todayActivities)}>
+                      <Pressable
+                        style={[styles.btnGreen, pendingIds.has(item.id) && { opacity: 0.4 }]}
+                        onPress={() => updateCheckin(item, 'done', todayActivities)}
+                        disabled={pendingIds.has(item.id)}
+                      >
                         <Text style={styles.btnGreenText}>Saí</Text>
                       </Pressable>
                     )}

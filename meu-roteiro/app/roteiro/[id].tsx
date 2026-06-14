@@ -13,24 +13,8 @@ import {
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useTheme, type Colors } from '../../lib/theme';
+import { getDayDate, getDayDateISO, getLocalDateISO, getTripDateStatus } from '../../lib/tripDates';
 import type { Activity, ActivityType, Flight, Itinerary } from '../../types';
-
-function getDayDate(startDate: string, day: number): string {
-  const [y, m, d] = startDate.split('-').map(Number);
-  const date = new Date(y, m - 1, d + day - 1);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-function getDayDateISO(startDate: string, day: number): string {
-  const [y, m, d] = startDate.split('-').map(Number);
-  const date = new Date(y, m - 1, d + day - 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function getLocalDateISO(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 function formatFlightTime(iso: string): string {
   const d = new Date(iso);
@@ -322,15 +306,9 @@ export default function RoteiroDetailScreen() {
   const days = Array.from({ length: itinerary.duration ?? 1 }, (_, i) => i + 1);
   const dayActivities = activities.filter((a) => a.day === selectedDay);
 
-  const isTripActive = (() => {
-    if (!itinerary.start_date || !itinerary.duration) return false;
-    const [y, m, d] = itinerary.start_date.split('-').map(Number);
-    const start = new Date(y, m - 1, d);
-    const end = new Date(y, m - 1, d + itinerary.duration - 1);
-    const today = new Date();
-    const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    return todayDate >= start && todayDate <= end;
-  })();
+  const isTripActive = itinerary.start_date && itinerary.duration
+    ? getTripDateStatus(itinerary.start_date, itinerary.duration).isActive
+    : false;
 
   const dayFlights = flights.filter((f) => {
     const flightDate = getLocalDateISO(f.departure_datetime);
