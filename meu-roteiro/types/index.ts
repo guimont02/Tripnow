@@ -22,6 +22,9 @@ export interface Activity {
   culinary_type?: string;
   estimated_price?: string;
   pdf_url?: string;
+  status?: 'on_way' | 'in_progress' | 'done';
+  departed_at?: string;
+  arrived_at?: string;
   created_at: string;
 }
 
